@@ -17,7 +17,7 @@ export default class PendingQuotes extends LightningElement {
     // Acá guardamos el "resultado del wire" para poder hacer refreshApex después
     wiredResult;
 
-    // Columnas de la tabla (lo típico en LWC datatable)
+    // Columnas de la tabla 
     columns = [
         { label: 'Quote Name', fieldName: 'quoteName' },
         { label: 'Opportunity', fieldName: 'opportunityName' },
@@ -29,7 +29,7 @@ export default class PendingQuotes extends LightningElement {
             fixedWidth: 120,
             typeAttributes: {
                 label: 'Approve',
-                name: 'approve',      // esto es la "acción" que vamos a chequear
+                name: 'approve',      // esto es la "acción" 
                 title: 'Approve Quote',
                 variant: 'brand'
             }
@@ -66,7 +66,7 @@ export default class PendingQuotes extends LightningElement {
         }
     }
 
-    // Esto sirve para mostrar un mensaje tipo: "no hay nada" cuando no hay data y tampoco hay error
+    // Esto sirve para mostrar un mensaje tipo "no hay nada" cuando no hay data y tampoco hay error
     
     get isEmpty() {
         if (this.errorMessage) return false;
@@ -100,7 +100,7 @@ export default class PendingQuotes extends LightningElement {
                     })
                 );
 
-                // Y refresco el wire para que la tabla se actualice (se vaya la quote aprobada)
+                // Y actualizo el wire para que la tabla se actualice (se vaya la quote aprobada)
                 return refreshApex(this.wiredResult);
             })
             .catch((e) => {
