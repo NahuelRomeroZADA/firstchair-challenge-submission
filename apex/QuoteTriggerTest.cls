@@ -1,120 +1,178 @@
 @IsTest
 private class QuoteTriggerTest {
 
+    // Crea un usuario "manager" de prueba para poder completar el lookup Manager__c
     private static User createTestManagerUser() {
-        Profile p = [SELECT Id FROM Profile WHERE UserType = 'Standard' LIMIT 1];
 
-        User u = new User(
-            FirstName = 'Test',
-            LastName  = 'Manager',
-            Email     = 'test.manager@example.com',
-            Username  = 'test.manager.' + System.currentTimeMillis() + '@example.com',
-            Alias     = 'tman',
-            TimeZoneSidKey     = 'America/Los_Angeles',
-            LocaleSidKey       = 'en_US',
-            EmailEncodingKey   = 'UTF-8',
-            LanguageLocaleKey  = 'en_US',
-            ProfileId          = p.Id
-        );
+        // agarro un profile standard cualquiera (para que el user sea válido)
+        Profile profileStandard = [
+            SELECT Id
+            FROM Profile
+            WHERE UserType = 'Standard'
+            LIMIT 1
+        ];
+
+        User u = new User();
+        u.FirstName = 'Test';
+        u.LastName  = 'Manager';
+        u.Email     = 'test.manager@example.com';
+
+        // Username tiene que ser único en Salesforce sí o sí
+        u.Username  = 'test.manager.' + System.currentTimeMillis() + '@example.com';
+
+        u.Alias            = 'tman';
+        u.TimeZoneSidKey   = 'America/Los_Angeles';
+        u.LocaleSidKey     = 'en_US';
+        u.EmailEncodingKey = 'UTF-8';
+        u.LanguageLocaleKey= 'en_US';
+        u.ProfileId        = profileStandard.Id;
+
         insert u;
         return u;
     }
 
+    // Crea Account + Opportunity de prueba
     private static Opportunity createOpportunity() {
-        Account a = new Account(Name = 'Test Account');
-        insert a;
 
-        Opportunity opp = new Opportunity(
-            Name = 'Test Opp',
-            StageName = 'Prospecting',
-            CloseDate = Date.today().addDays(30),
-            Amount = 100,
-            AccountId = a.Id
-        );
+        Account acc = new Account();
+        acc.Name = 'Test Account';
+        insert acc;
+
+        Opportunity opp = new Opportunity();
+        opp.Name = 'Test Opp';
+        opp.StageName = 'Prospecting';
+        opp.CloseDate = Date.today().addDays(30);
+        opp.Amount = 100;
+        opp.AccountId = acc.Id;
+
         insert opp;
         return opp;
     }
 
     @IsTest
     static void testLatestApprovedQuoteWins() {
-        User manager = createTestManagerUser();
-        Opportunity opp = createOpportunity();
 
+        // 1) Setup básico (user + opp)
+        User managerUser = createTestManagerUser();
+        Opportunity testOpp = createOpportunity();
 
-        Quote q1 = new Quote(
-            Name = 'Quote 1',
-            OpportunityId = opp.Id,
-            Discount__c = 10,
-            Approval_Status__c = 'Draft',
-            Total_Amount__c = 500,
-            Manager__c = manager.Id
-        );
-        Quote q2 = new Quote(
-            Name = 'Quote 2',
-            OpportunityId = opp.Id,
-            Discount__c = 10,
-            Approval_Status__c = 'Draft',
-            Total_Amount__c = 900,
-            Manager__c = manager.Id
-        );
-        insert new List<Quote>{ q1, q2 };
+        // 2) Creo dos quotes en Draft (todavía no ejecutan nada)
+        Quote quote1 = new Quote();
+        quote1.Name = 'Quote 1';
+        quote1.OpportunityId = testOpp.Id;
+        quote1.Discount__c = 10;
+        quote1.Approval_Status__c = 'Draft';
+        quote1.Total_Amount__c = 500;
+        quote1.Manager__c = managerUser.Id;
 
+        Quote quote2 = new Quote();
+        quote2.Name = 'Quote 2';
+        quote2.OpportunityId = testOpp.Id;
+        quote2.Discount__c = 10;
+        quote2.Approval_Status__c = 'Draft';
+        quote2.Total_Amount__c = 900;
+        quote2.Manager__c = managerUser.Id;
 
-        q1.Approval_Status__c = 'Approved';
-        q2.Approval_Status__c = 'Approved';
+        insert new List<Quote>{ quote1, quote2 };
+
+        // 3) Ahora las paso a Approved (acá es donde el trigger debería actualizar Opportunity.Amount)
+        quote1.Approval_Status__c = 'Approved';
+        quote2.Approval_Status__c = 'Approved';
 
         Test.startTest();
-        update q1;
-        update q2;
+
+        // las actualizo una por una para simular "se aprobó una y después la otra"
+        update quote1;
+        update quote2;
+
         Test.stopTest();
 
-        Opportunity oppCheck = [SELECT Amount FROM Opportunity WHERE Id = :opp.Id];
-        System.assertEquals(900, oppCheck.Amount, 'Most recently approved Quote should update Opportunity.Amount');
+        // 4) Chequeo: como quote2 fue la última en aprobarse, gana y debe dejar Amount = 900
+        Opportunity oppAfter = [
+            SELECT Amount
+            FROM Opportunity
+            WHERE Id = :testOpp.Id
+        ];
+
+        System.assertEquals(
+            900,
+            oppAfter.Amount,
+            'La última Quote aprobada debería dejar el Amount en 900'
+        );
     }
 
     @IsTest
     static void testBulkApprovalsAcrossMultipleOpportunities() {
-        User manager = createTestManagerUser();
 
-        Account a = new Account(Name = 'Bulk Account');
-        insert a;
+        // 1) Setup: user manager
+        User managerUser = createTestManagerUser();
 
-        Opportunity opp1 = new Opportunity(Name='Opp 1', StageName='Prospecting', CloseDate=Date.today().addDays(10), Amount=0, AccountId=a.Id);
-        Opportunity opp2 = new Opportunity(Name='Opp 2', StageName='Prospecting', CloseDate=Date.today().addDays(10), Amount=0, AccountId=a.Id);
+        // 2) Creo una cuenta para las dos oportunidades
+        Account bulkAccount = new Account();
+        bulkAccount.Name = 'Bulk Account';
+        insert bulkAccount;
+
+        // 3) Creo dos opportunities
+        Opportunity opp1 = new Opportunity();
+        opp1.Name = 'Opp 1';
+        opp1.StageName = 'Prospecting';
+        opp1.CloseDate = Date.today().addDays(10);
+        opp1.Amount = 0;
+        opp1.AccountId = bulkAccount.Id;
+
+        Opportunity opp2 = new Opportunity();
+        opp2.Name = 'Opp 2';
+        opp2.StageName = 'Prospecting';
+        opp2.CloseDate = Date.today().addDays(10);
+        opp2.Amount = 0;
+        opp2.AccountId = bulkAccount.Id;
+
         insert new List<Opportunity>{ opp1, opp2 };
 
-        Quote q1 = new Quote(
-            Name='Q1',
-            OpportunityId=opp1.Id,
-            Approval_Status__c='Draft',
-            Discount__c=10,
-            Total_Amount__c=111,
-            Manager__c=manager.Id
-        );
-        Quote q2 = new Quote(
-            Name='Q2',
-            OpportunityId=opp2.Id,
-            Approval_Status__c='Draft',
-            Discount__c=10,
-            Total_Amount__c=222,
-            Manager__c=manager.Id
-        );
-        insert new List<Quote>{ q1, q2 };
+        // 4) Creo una quote para cada opp (en Draft)
+        Quote quoteOpp1 = new Quote();
+        quoteOpp1.Name = 'Q1';
+        quoteOpp1.OpportunityId = opp1.Id;
+        quoteOpp1.Approval_Status__c = 'Draft';
+        quoteOpp1.Discount__c = 10;
+        quoteOpp1.Total_Amount__c = 111;
+        quoteOpp1.Manager__c = managerUser.Id;
 
-        q1.Approval_Status__c = 'Approved';
-        q2.Approval_Status__c = 'Approved';
+        Quote quoteOpp2 = new Quote();
+        quoteOpp2.Name = 'Q2';
+        quoteOpp2.OpportunityId = opp2.Id;
+        quoteOpp2.Approval_Status__c = 'Draft';
+        quoteOpp2.Discount__c = 10;
+        quoteOpp2.Total_Amount__c = 222;
+        quoteOpp2.Manager__c = managerUser.Id;
+
+        insert new List<Quote>{ quoteOpp1, quoteOpp2 };
+
+        // 5) Las apruebo a las dos
+        quoteOpp1.Approval_Status__c = 'Approved';
+        quoteOpp2.Approval_Status__c = 'Approved';
 
         Test.startTest();
-        update new List<Quote>{ q1, q2 };
+
+        // update bulk (las dos juntas) para probar que el trigger es bulk-safe
+        update new List<Quote>{ quoteOpp1, quoteOpp2 };
+
         Test.stopTest();
 
-        Map<Id, Opportunity> opps = new Map<Id, Opportunity>([
+        // 6) Traigo las dos opportunities y verifico que cada una quedó con su amount correcto
+        List<Opportunity> oppsAfter = [
             SELECT Id, Amount
             FROM Opportunity
             WHERE Id IN :new List<Id>{ opp1.Id, opp2.Id }
-        ]);
+        ];
 
-        System.assertEquals(111, opps.get(opp1.Id).Amount);
-        System.assertEquals(222, opps.get(opp2.Id).Amount);
+        // armo mapa para buscar fácil por id (más cómodo para asserts)
+        Map<Id, Opportunity> oppMap = new Map<Id, Opportunity>();
+        for (Opportunity o : oppsAfter) {
+            oppMap.put(o.Id, o);
+        }
+
+        System.assertEquals(111, oppMap.get(opp1.Id).Amount, 'Opp 1 debería quedar con 111');
+        System.assertEquals(222, oppMap.get(opp2.Id).Amount, 'Opp 2 debería quedar con 222');
     }
 }
